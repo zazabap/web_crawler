@@ -1,7 +1,6 @@
-
 use crate::fetcher;
 use crate::parser;
-use crate::storage;
+use crate::storage::{StorageBackend, StorageManager};
 use crate::config::Config;
 use std::collections::{HashSet, VecDeque};
 use tokio::sync::Mutex;
@@ -11,18 +10,32 @@ use std::sync::Arc;
 pub async fn start(config: Config) {
     let visited_urls = Arc::new(Mutex::new(HashSet::new()));
     let url_queue = Arc::new(Mutex::new(VecDeque::from(vec![config.start_url.clone()])));
+    let storage = StorageManager::new(StorageBackend::Sqlite); // Example: Use SQLite backend
 
-    crawl(url_queue, visited_urls, config.depth_limit).await;
+    crawl(url_queue, visited_urls, storage, config.depth_limit).await;
 }
 
 /// The main crawling loop that processes URLs asynchronously up to a specified depth.
-async fn crawl(url_queue: Arc<Mutex<VecDeque<String>>>, visited_urls: Arc<Mutex<HashSet<String>>>, depth_limit: usize) {
+async fn crawl(
+    url_queue: Arc<Mutex<VecDeque<String>>>,
+    visited_urls: Arc<Mutex<HashSet<String>>>,
+    storage: StorageManager,
+    depth_limit: usize,
+) {
     while let Some(url) = get_next_url(&url_queue, &visited_urls).await {
         match fetcher::fetch_page(&url).await {
             Ok(html) => {
                 println!("Fetched URL: {}", url);
+
+                // Parse the links from the fetched HTML
                 let links = parser::extract_links(&url, &html);
-                storage::save_to_csv(&url, &html).unwrap();
+
+                // Store data using the configured storage backend
+                if let Err(e) = storage.save(&url, &html) {
+                    eprintln!("Error saving data: {}", e);
+                }
+
+                // Add new links to the queue
                 add_new_links_to_queue(links, &url_queue, &visited_urls, depth_limit).await;
             }
             Err(e) => eprintln!("Error fetching {}: {}", url, e),
@@ -31,7 +44,10 @@ async fn crawl(url_queue: Arc<Mutex<VecDeque<String>>>, visited_urls: Arc<Mutex<
 }
 
 /// Gets the next URL from the queue, ensuring it hasn't been visited.
-async fn get_next_url(url_queue: &Arc<Mutex<VecDeque<String>>>, visited_urls: &Arc<Mutex<HashSet<String>>>) -> Option<String> {
+async fn get_next_url(
+    url_queue: &Arc<Mutex<VecDeque<String>>>,
+    visited_urls: &Arc<Mutex<HashSet<String>>>,
+) -> Option<String> {
     let mut queue = url_queue.lock().await;
     let mut visited = visited_urls.lock().await;
 
@@ -45,7 +61,12 @@ async fn get_next_url(url_queue: &Arc<Mutex<VecDeque<String>>>, visited_urls: &A
 }
 
 /// Adds new links to the queue if they haven't been visited and are within the depth limit.
-async fn add_new_links_to_queue(links: Vec<String>, url_queue: &Arc<Mutex<VecDeque<String>>>, visited_urls: &Arc<Mutex<HashSet<String>>>, depth_limit: usize) {
+async fn add_new_links_to_queue(
+    links: Vec<String>,
+    url_queue: &Arc<Mutex<VecDeque<String>>>,
+    visited_urls: &Arc<Mutex<HashSet<String>>>,
+    depth_limit: usize,
+) {
     let mut queue = url_queue.lock().await;
     let visited = visited_urls.lock().await;
 

@@ -1,11 +1,40 @@
-
 use std::fs::File;
-use std::io::Error as IoError;
+use std::io::{Write, Error as IoError};
 use csv::Writer;
 use rusqlite::{params, Connection, Result as SqlResult};
 
+/// Enum representing storage backends.
+pub enum StorageBackend {
+    Csv,
+    Sqlite,
+}
+
+/// Struct to manage the storage configuration.
+pub struct StorageManager {
+    backend: StorageBackend,
+}
+
+impl StorageManager {
+    /// Creates a new `StorageManager` with the specified backend.
+    pub fn new(backend: StorageBackend) -> Self {
+        StorageManager { backend }
+    }
+
+    /// Saves a URL and its HTML content using the selected storage backend.
+    pub fn save(&self, url: &str, html_content: &str) -> Result<(), String> {
+        match self.backend {
+            StorageBackend::Csv => {
+                save_to_csv(url, html_content).map_err(|e| format!("CSV Error: {}", e))
+            }
+            StorageBackend::Sqlite => {
+                save_to_sqlite(url, html_content).map_err(|e| format!("SQLite Error: {}", e))
+            }
+        }
+    }
+}
+
 /// Saves a row of data to a CSV file.
-pub fn save_to_csv(url: &str, html_content: &str) -> Result<(), IoError> {
+fn save_to_csv(url: &str, html_content: &str) -> Result<(), IoError> {
     let file = File::options().append(true).create(true).open("output.csv")?;
     let mut wtr = Writer::from_writer(file);
 
@@ -15,7 +44,7 @@ pub fn save_to_csv(url: &str, html_content: &str) -> Result<(), IoError> {
 }
 
 /// Saves crawled data into an SQLite database.
-pub fn save_to_sqlite(url: &str, html_content: &str) -> SqlResult<()> {
+fn save_to_sqlite(url: &str, html_content: &str) -> SqlResult<()> {
     let conn = Connection::open("output.db")?;
 
     // Ensure the table exists
