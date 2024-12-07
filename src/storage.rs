@@ -1,5 +1,6 @@
+
 use std::fs::File;
-use std::io::{Write, Error as IoError};
+use std::io::Error as IoError;
 use csv::Writer;
 use rusqlite::{params, Connection, Result as SqlResult};
 
@@ -35,4 +36,3 @@ pub fn save_to_sqlite(url: &str, html_content: &str) -> SqlResult<()> {
 
     Ok(())
 }
-

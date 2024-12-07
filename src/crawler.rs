@@ -12,25 +12,17 @@ pub async fn start(config: Config) {
     let visited_urls = Arc::new(Mutex::new(HashSet::new()));
     let url_queue = Arc::new(Mutex::new(VecDeque::from(vec![config.start_url.clone()])));
 
-    // Start the crawl loop with a depth limit
     crawl(url_queue, visited_urls, config.depth_limit).await;
 }
 
 /// The main crawling loop that processes URLs asynchronously up to a specified depth.
 async fn crawl(url_queue: Arc<Mutex<VecDeque<String>>>, visited_urls: Arc<Mutex<HashSet<String>>>, depth_limit: usize) {
     while let Some(url) = get_next_url(&url_queue, &visited_urls).await {
-        // Fetch the page content
         match fetcher::fetch_page(&url).await {
             Ok(html) => {
                 println!("Fetched URL: {}", url);
-
-                // Parse the links from the fetched HTML
-                let links = parser::extract_links(&html);
-
-                // Store data (for example, save the HTML or links to storage)
-                storage::save_to_csv(&url); // Example; customize as needed
-
-                // Add new links to the queue
+                let links = parser::extract_links(&url, &html);
+                storage::save_to_csv(&url, &html).unwrap();
                 add_new_links_to_queue(links, &url_queue, &visited_urls, depth_limit).await;
             }
             Err(e) => eprintln!("Error fetching {}: {}", url, e),

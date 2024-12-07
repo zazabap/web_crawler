@@ -1,3 +1,4 @@
+
 use url::{Url, ParseError};
 
 /// Checks if a given URL string is valid.

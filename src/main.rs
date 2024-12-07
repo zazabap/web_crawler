@@ -2,10 +2,14 @@
 // Purpose: create a crawler app that could access the network language datasets. 
 // Date: 2024/11/15
 
-mod crawler;
 mod config;
+mod fetcher;
+mod parser;
+mod storage;
+mod crawler;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let config = config::Config::from_args();
-    crawler::start(config);
+    crawler::start(config).await;
 }

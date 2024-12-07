@@ -1,3 +1,4 @@
+
 use structopt::StructOpt;
 
 /// Configuration for the web crawler, parsed from command-line arguments.
@@ -23,6 +24,6 @@ pub struct Config {
 impl Config {
     /// Parses command-line arguments and returns a `Config` instance.
     pub fn from_args() -> Self {
-        Config::from_args()
+        StructOpt::from_args()
     }
 }
