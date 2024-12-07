@@ -14,3 +14,7 @@ structopt = "0.3"
 
 [features]
 default = []
+
+[[bin]]
+name = "visualize"
+path = "src/visualize.rs"
