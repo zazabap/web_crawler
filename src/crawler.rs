@@ -1,78 +1,141 @@
-use crate::fetcher;
-use crate::parser;
-use crate::storage::{StorageBackend, StorageManager};
-use crate::config::Config;
 use std::collections::{HashSet, VecDeque};
 use tokio::sync::Mutex;
 use std::sync::Arc;
+use url::Url;
+use scraper::{Html, Selector};
+use crate::config::Config;
 
-/// Starts the crawling process using the provided configuration.
-pub async fn start(config: Config) {
-    let visited_urls = Arc::new(Mutex::new(HashSet::new()));
-    let url_queue = Arc::new(Mutex::new(VecDeque::from(vec![config.start_url.clone()])));
-    let storage = StorageManager::new(StorageBackend::Sqlite); // Example: Use SQLite backend
-
-    crawl(url_queue, visited_urls, storage, config.depth_limit).await;
+#[derive(Debug)]
+pub struct Page {
+    pub url: String,
+    pub title: Option<String>,
+    pub status_code: Option<i32>,
 }
 
-/// The main crawling loop that processes URLs asynchronously up to a specified depth.
-async fn crawl(
-    url_queue: Arc<Mutex<VecDeque<String>>>,
-    visited_urls: Arc<Mutex<HashSet<String>>>,
-    storage: StorageManager,
-    depth_limit: usize,
-) {
-    while let Some(url) = get_next_url(&url_queue, &visited_urls).await {
-        match fetcher::fetch_page(&url).await {
-            Ok(html) => {
-                println!("Fetched URL: {}", url);
+pub async fn crawl(config: &Config) -> Result<Vec<Page>, Box<dyn std::error::Error + Send + Sync>> {
+    let visited_urls: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+    let url_queue = Arc::new(Mutex::new(VecDeque::from(vec![(config.start_url.clone(), 0)])));
+    let results = Arc::new(Mutex::new(Vec::new()));
+    let base_domain = if config.same_domain {
+        extract_domain(&config.start_url)?
+    } else {
+        String::new()
+    };
 
-                // Parse the links from the fetched HTML
-                let links = parser::extract_links(&url, &html);
+    while let Some((url, depth)) = get_next_url(&url_queue, &visited_urls).await {
+        if depth >= config.depth_limit {
+            continue;
+        }
 
-                // Store data using the configured storage backend
-                if let Err(e) = storage.save(&url, &html) {
-                    eprintln!("Error saving data: {}", e);
+        let results_clone = Arc::clone(&results);
+        let queue_clone = Arc::clone(&url_queue);
+        let visited_clone = Arc::clone(&visited_urls);
+        
+        match fetch_page(&url).await {
+            Ok((title, status, links)) => {
+                // Process the page
+                let mut results = results_clone.lock().await;
+                results.push(Page {
+                    url: url.clone(),
+                    title,
+                    status_code: Some(status),
+                });
+
+                // Add new links to the queue (in a separate step to avoid holding the results lock)
+                for link in links {
+                    if should_crawl_url(&link, &base_domain, config.same_domain) {
+                        let mut queue = queue_clone.lock().await;
+                        let visited = visited_clone.lock().await;
+                        if !visited.contains(&link) {
+                            queue.push_back((link, depth + 1));
+                        }
+                    }
                 }
 
-                // Add new links to the queue
-                add_new_links_to_queue(links, &url_queue, &visited_urls, depth_limit).await;
+                if let Some(max_pages) = config.max_pages {
+                    if results.len() >= max_pages {
+                        break;
+                    }
+                }
             }
-            Err(e) => eprintln!("Error fetching {}: {}", url, e),
+            Err(e) => eprintln!("Error processing {}: {}", url, e),
         }
     }
+
+    let final_results = Arc::try_unwrap(results)
+        .unwrap()
+        .into_inner();
+
+    Ok(final_results)
 }
 
-/// Gets the next URL from the queue, ensuring it hasn't been visited.
+// Fetch a page and return the title, status code, and extracted links
+async fn fetch_page(
+    url: &str,
+) -> Result<(Option<String>, i32, Vec<String>), Box<dyn std::error::Error + Send + Sync>> {
+    let client = reqwest::Client::new();
+    let response = client.get(url).send().await?;
+    let status = response.status().as_u16() as i32;
+    let html = response.text().await?;
+    
+    // Process HTML in a more Send-friendly way
+    let document = Html::parse_document(&html);
+    
+    // Extract title
+    let title = document
+        .select(&Selector::parse("title").unwrap())
+        .next()
+        .and_then(|title| Some(title.inner_html()));
+    
+    // Extract links (do this before we return from the function)
+    let links = extract_links(url, &document);
+    
+    Ok((title, status, links))
+}
+
+fn extract_domain(url: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let parsed = Url::parse(url)?;
+    Ok(parsed.host_str().unwrap_or("").to_string())
+}
+
+fn should_crawl_url(url: &str, base_domain: &str, same_domain: bool) -> bool {
+    if !same_domain {
+        return true;
+    }
+
+    if let Ok(parsed) = Url::parse(url) {
+        if let Some(host) = parsed.host_str() {
+            return host.contains(base_domain);
+        }
+    }
+    false
+}
+
 async fn get_next_url(
-    url_queue: &Arc<Mutex<VecDeque<String>>>,
+    url_queue: &Arc<Mutex<VecDeque<(String, usize)>>>,
     visited_urls: &Arc<Mutex<HashSet<String>>>,
-) -> Option<String> {
+) -> Option<(String, usize)> {
     let mut queue = url_queue.lock().await;
     let mut visited = visited_urls.lock().await;
 
-    while let Some(url) = queue.pop_front() {
+    while let Some((url, depth)) = queue.pop_front() {
         if !visited.contains(&url) {
             visited.insert(url.clone());
-            return Some(url);
+            return Some((url, depth));
         }
     }
     None
 }
 
-/// Adds new links to the queue if they haven't been visited and are within the depth limit.
-async fn add_new_links_to_queue(
-    links: Vec<String>,
-    url_queue: &Arc<Mutex<VecDeque<String>>>,
-    visited_urls: &Arc<Mutex<HashSet<String>>>,
-    depth_limit: usize,
-) {
-    let mut queue = url_queue.lock().await;
-    let visited = visited_urls.lock().await;
+fn extract_links(base_url: &str, document: &Html) -> Vec<String> {
+    let selector = Selector::parse("a[href]").unwrap();
+    let base_url = Url::parse(base_url).unwrap();
 
-    for link in links {
-        if !visited.contains(&link) && queue.len() < depth_limit {
-            queue.push_back(link);
-        }
-    }
+    document
+        .select(&selector)
+        .filter_map(|element| {
+            let href = element.value().attr("href")?;
+            base_url.join(href).ok().map(|url| url.to_string())
+        })
+        .collect()
 }

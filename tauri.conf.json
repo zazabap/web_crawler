@@ -1,0 +1,32 @@
+{
+  "package": {
+    "productName": "web-crawler",
+    "version": "0.1.1"
+  },
+  "build": {
+    "devPath": "dist",
+    "devUrl": "http://localhost:4000"
+  },
+  "tauri": {
+    "allowlist": {
+      "all": true
+    },
+    "bundle": {
+      "active": true,
+      "targets": "all",
+      "identifier": "com.webcrawler.app",
+      "icon": ["icons/icon.png"]
+    },
+    "security": {
+      "csp": "default-src 'self'"
+    },
+    "windows": [
+      {
+        "title": "Web Crawler",
+        "width": 1200,
+        "height": 800,
+        "resizable": true
+      }
+    ]
+  }
+}

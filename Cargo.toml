@@ -4,17 +4,17 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-tokio = { version = "1.33", features = ["full"] }
-reqwest = { version = "0.12.12", features = ["json"] }
-rusqlite = "0.34.0"
-csv = "1.2"
-scraper = "0.23.1"
-url = "2.3"
 structopt = "0.3"
+tokio = { version = "1.0", features = ["full"] }
+reqwest = { version = "0.11", features = ["json"] }
+scraper = "0.18"
+url = "2.5"
+axum = { version = "0.6", features = ["headers", "http2", "json", "macros", "matched-path", "original-uri", "query", "tokio", "tower-log", "tracing"] }
+tower-http = { version = "0.4", features = ["cors", "trace"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
 
 [features]
 default = []
-
-[[bin]]
-name = "visualize"
-path = "src/visualize.rs"
